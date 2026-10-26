@@ -390,29 +390,17 @@ async def start_webserver():
 
 # ─── Run ──────────────────────────────────────────────────
 async def main():
+    # Start health check server first (keeps Render alive)
     await start_webserver()
 
-    max_retries = 10
-    delay = 30  # start with 30 seconds
+    # Wait before connecting to let any rate limits expire
+    startup_delay = int(os.getenv("STARTUP_DELAY", "0"))
+    if startup_delay > 0:
+        log.info(f"⏳ Waiting {startup_delay}s before connecting to Discord...")
+        await asyncio.sleep(startup_delay)
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            log.info(f"🔌 Connecting to Discord... (attempt {attempt}/{max_retries})")
-            async with bot:
-                await bot.start(TOKEN)
-        except discord.errors.HTTPException as e:
-            if e.status == 429:
-                log.warning(f"⏳ Rate limited! Waiting {delay}s before retry...")
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, 600)  # double wait, max 10 min
-            else:
-                log.error(f"❌ HTTP error: {e}")
-                await asyncio.sleep(30)
-        except Exception as e:
-            log.error(f"❌ Unexpected error: {e}")
-            await asyncio.sleep(30)
-
-    log.error("❌ Max retries reached. Exiting.")
+    log.info("🔌 Connecting to Discord...")
+    await bot.start(TOKEN)
 
 
 if __name__ == "__main__":
