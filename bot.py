@@ -390,9 +390,29 @@ async def start_webserver():
 
 # ─── Run ──────────────────────────────────────────────────
 async def main():
-    async with bot:
-        await start_webserver()
-        await bot.start(TOKEN)
+    await start_webserver()
+
+    max_retries = 10
+    delay = 30  # start with 30 seconds
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            log.info(f"🔌 Connecting to Discord... (attempt {attempt}/{max_retries})")
+            async with bot:
+                await bot.start(TOKEN)
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                log.warning(f"⏳ Rate limited! Waiting {delay}s before retry...")
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 600)  # double wait, max 10 min
+            else:
+                log.error(f"❌ HTTP error: {e}")
+                await asyncio.sleep(30)
+        except Exception as e:
+            log.error(f"❌ Unexpected error: {e}")
+            await asyncio.sleep(30)
+
+    log.error("❌ Max retries reached. Exiting.")
 
 
 if __name__ == "__main__":
