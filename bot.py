@@ -116,18 +116,20 @@ config = ConfigManager()
 async def on_ready():
     log.info(f"✅ Bot is online: {bot.user} (ID: {bot.user.id})")
     log.info(f"   Connected to {len(bot.guilds)} server(s)")
-    # Sync slash commands
-    try:
-        synced = await bot.tree.sync()
-        log.info(f"   Synced {len(synced)} slash command(s)")
-    except Exception as e:
-        log.error(f"   Failed to sync slash commands: {e}")
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
             name="Mimi drops 👀",
         )
     )
+
+
+@bot.command(name="sync", help="Sync slash commands (owner only)")
+@commands.is_owner()
+async def cmd_sync(ctx: commands.Context):
+    """Manually sync slash commands. Run once: !sync"""
+    synced = await bot.tree.sync()
+    await ctx.send(f"✅ Synced {len(synced)} slash command(s).")
 
 
 @bot.event
