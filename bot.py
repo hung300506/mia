@@ -390,36 +390,13 @@ async def start_webserver():
 
 # ─── Run ──────────────────────────────────────────────────
 async def main():
-    # Start health check server first (keeps Render alive during retries)
-    await start_webserver()
+    # Only start health check server if PORT is provided (e.g. Render/web hosts)
+    port = os.getenv("PORT")
+    if port:
+        await start_webserver()
 
-    delay = 60  # start with 60 seconds
-
-    while True:
-        try:
-            log.info(f"🔌 Connecting to Discord...")
-            await bot.start(TOKEN)
-        except discord.errors.HTTPException as e:
-            if e.status == 429:
-                log.warning(f"⏳ Rate limited! Waiting {delay}s before retry...")
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, 900)  # 60 → 120 → 240 → ... max 15 min
-            else:
-                log.error(f"❌ HTTP error: {e}. Retrying in 60s...")
-                await asyncio.sleep(60)
-        except Exception as e:
-            log.error(f"❌ Error: {e}. Retrying in 60s...")
-            await asyncio.sleep(60)
-        finally:
-            # Reset bot internal state so it can reconnect
-            if not bot.is_closed():
-                await bot.close()
-            bot._ready = asyncio.Event()
-            bot.http = discord.http.HTTPClient(
-                max_ratelimit_timeout=30.0,
-                proxy=bot.http.proxy,
-                proxy_auth=bot.http.proxy_auth,
-            )
+    log.info("🔌 Connecting to Discord...")
+    await bot.start(TOKEN)
 
 
 if __name__ == "__main__":
