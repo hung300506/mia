@@ -1,6 +1,8 @@
 """
 Mimi Helper Bot - Discord Bot
-Main function: Ping a role when Mimi bot drops cards (self-drop only).
+Features:
+1. Ping a role when Mimi bot drops cards (self-drop only).
+2. Card stats evaluator: reply to Mimi card with `@bot calc` or `!calc` / `/calc`.
 """
 
 import discord
@@ -34,12 +36,299 @@ DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "config.json"
 
 # Pattern to detect Mimi's self-drop message
-# Example: "<@1476927725775356037> dropped 3 cards! ..."
-# Only matches when Mimi mentions itself (self-drop)
 DROP_PATTERN = re.compile(
     rf"<@!?{MIMI_BOT_ID}>\s+dropped\s+\d+\s+cards?!",
     re.IGNORECASE,
 )
+
+# ─── Stat Constants ─────────────────────────────────────────
+# I, Base stats at Lv 1 (Min: 4750/950/650/450, Max: 5250/1050/750/550)
+BASE_STATS = {
+    "HP": (4750, 5250),
+    "ATK": (950, 1050),
+    "DEF": (650, 750),
+    "SPD": (450, 550),
+}
+
+# II, Stat gains per level (max level 150)
+PER_LEVEL = {
+    "HP": (45, 70),
+    "ATK": (8, 15),
+    "DEF": (5, 9),
+    "SPD": (3, 8),
+}
+
+# III, Ascend milestones and bonus %
+# Milestones: 20/50/80/100/120/150
+# Bonus: 20%/25%/30%/35%/40%/50%
+ASCEND_TIERS = [
+    (20, 0.20),
+    (50, 0.25),
+    (80, 0.30),
+    (100, 0.35),
+    (120, 0.40),
+    (150, 0.50),
+]
+
+
+# ─── Stat Calculator ────────────────────────────────────────
+def calculate_stats_range(level: int, current_hp: int | None = None, num_ascends: int | None = None):
+    """
+    Calculate min and max range for each stat at a given level.
+    Auto-detects ascend tier if num_ascends is not explicitly provided.
+    """
+    level = max(1, min(150, level))
+
+    if num_ascends is None:
+        ascends = 0
+        for milestone, bonus in ASCEND_TIERS:
+            if level > milestone:
+                ascends += 1
+            elif level == milestone:
+                # Check midpoint at milestone to detect if ascended
+                temp_min, temp_max = BASE_STATS["HP"]
+                curr = 1
+                for m, b in ASCEND_TIERS[:ascends]:
+                    temp_min = (temp_min + (m - curr) * PER_LEVEL["HP"][0]) * (1 + b)
+                    temp_max = (temp_max + (m - curr) * PER_LEVEL["HP"][1]) * (1 + b)
+                    curr = m
+                unasc_max = temp_max + (milestone - curr) * PER_LEVEL["HP"][1]
+                unasc_min = temp_min + (milestone - curr) * PER_LEVEL["HP"][0]
+                asc_min = unasc_min * (1 + bonus)
+                midpoint = (unasc_max + asc_min) / 2
+                if current_hp and current_hp >= midpoint:
+                    ascends += 1
+                break
+            else:
+                break
+        num_ascends = ascends
+
+    result = {}
+    for stat in ["HP", "ATK", "DEF", "SPD"]:
+        min_v, max_v = BASE_STATS[stat]
+        min_g, max_g = PER_LEVEL[stat]
+        curr = 1
+
+        for i, (m, b) in enumerate(ASCEND_TIERS):
+            if i < num_ascends:
+                target_lvl = min(level, m)
+                min_v += (target_lvl - curr) * min_g
+                max_v += (target_lvl - curr) * max_g
+                curr = target_lvl
+                min_v *= (1 + b)
+                max_v *= (1 + b)
+            else:
+                break
+        if curr < level:
+            min_v += (level - curr) * min_g
+            max_v += (level - curr) * max_g
+
+        result[stat] = (round(min_v), round(max_v))
+
+    return result, num_ascends
+
+
+def evaluate_card(stats: dict[str, int], level: int = 1):
+    """
+    Evaluate current stats against min and max stat ranges.
+    Returns percentage for each stat and overall average rating.
+    """
+    current_hp = stats.get("HP")
+    ranges, num_ascends = calculate_stats_range(level, current_hp=current_hp)
+
+    details = {}
+    total_pct = 0.0
+
+    for stat in ["HP", "ATK", "DEF", "SPD"]:
+        val = stats.get(stat, 0)
+        min_v, max_v = ranges[stat]
+        if max_v > min_v:
+            pct = ((val - min_v) / (max_v - min_v)) * 100.0
+        else:
+            pct = 100.0
+        pct = max(0.0, min(100.0, pct))  # clamp 0-100%
+        details[stat] = {
+            "val": val,
+            "min": min_v,
+            "max": max_v,
+            "pct": pct,
+        }
+        total_pct += pct
+
+    avg_pct = total_pct / 4.0
+
+    # Color indicator based on percentage
+    if avg_pct >= 85:
+        color = 0xFFD700  # Gold
+    elif avg_pct >= 75:
+        color = 0xFFA500  # Orange
+    elif avg_pct >= 65:
+        color = 0x9B59B6  # Purple
+    elif avg_pct >= 50:
+        color = 0x3498DB  # Blue
+    elif avg_pct >= 40:
+        color = 0x2ECC71  # Green
+    else:
+        color = 0x95A5A6  # Gray
+
+    return {
+        "level": level,
+        "ascends": num_ascends,
+        "details": details,
+        "avg_pct": avg_pct,
+        "color": color,
+    }
+
+
+def make_progress_bar(pct: float, length: int = 10) -> str:
+    filled = int(round((pct / 100.0) * length))
+    filled = max(0, min(length, filled))
+    return "█" * filled + "░" * (length - filled)
+
+
+# ─── Card Text / Embed Parser ──────────────────────────────
+def clean_discord_text(text: str) -> str:
+    # Remove custom emojis <:name:id> and <a:name:id>
+    text = re.sub(r"<a?:[a-zA-Z0-9_]+:[0-9]+>", " ", text)
+    # Remove user / role mentions <@123456>
+    text = re.sub(r"<@!?[0-9]+>", " ", text)
+    # Normalize special whitespace (ideographic space U+3000, non-breaking space U+00A0)
+    text = text.replace("\u3000", " ").replace("\u00a0", " ")
+    # Remove markdown formatting: *, _, `, ~
+    text = re.sub(r"[*_`~]", "", text)
+    return text
+
+
+def extract_stat(name: str, cleaned_text: str) -> int | None:
+    # Match stat name followed by optional spaces, separator, spaces, and digits
+    m = re.search(rf"\b{name}\b\s*[:：=]?\s*([\d,]+)", cleaned_text, re.IGNORECASE)
+    if m:
+        try:
+            return int(m.group(1).replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
+def parse_card_from_text(full_text: str):
+    """
+    Extract card name, level, and 4 stats from text or embed content.
+    """
+    cleaned = clean_discord_text(full_text)
+
+    # 1. Level (default: 1)
+    level = 1
+    m_lvl = re.search(r"(?:Level|Lv\.?)\s*[:：]?\s*(\d+)", cleaned, re.IGNORECASE)
+    if m_lvl:
+        try:
+            level = int(m_lvl.group(1))
+        except ValueError:
+            level = 1
+
+    # 2. Card Name
+    name = "Card"
+    m_name = re.search(r"^(.*?)\s*\|\s*(?:Level|Lv\.?)", cleaned, re.MULTILINE | re.IGNORECASE)
+    if m_name and m_name.group(1).strip():
+        name = m_name.group(1).strip()
+    else:
+        m_id = re.search(r"#(\d+)", cleaned)
+        if m_id:
+            name = f"Card #{m_id.group(1)}"
+
+    # 3. 4 Stats
+    stats = {}
+    for s in ["HP", "ATK", "DEF", "SPD"]:
+        val = extract_stat(s, cleaned)
+        if val is None:
+            return None, None, None
+        stats[s] = val
+
+    return name, level, stats
+
+
+def extract_card_from_message(msg: discord.Message):
+    """
+    Extract card information from a Discord message (content + embeds).
+    """
+    text_parts = []
+    if msg.content:
+        text_parts.append(msg.content)
+
+    image_url = None
+
+    for embed in msg.embeds:
+        if embed.title:
+            text_parts.append(embed.title)
+        if embed.author and embed.author.name:
+            text_parts.append(embed.author.name)
+        if embed.description:
+            text_parts.append(embed.description)
+        for field in embed.fields:
+            text_parts.append(f"{field.name}: {field.value}")
+        if embed.footer and embed.footer.text:
+            text_parts.append(embed.footer.text)
+        if embed.image and embed.image.url:
+            image_url = embed.image.url
+        elif embed.thumbnail and embed.thumbnail.url:
+            image_url = embed.thumbnail.url
+
+    full_text = "\n".join(text_parts)
+    name, level, stats = parse_card_from_text(full_text)
+    return name, level, stats, image_url
+
+
+def build_evaluation_embed(name: str, eval_data: dict, image_url: str | None = None) -> discord.Embed:
+    """
+    Build a Discord Embed to display card evaluation results in English.
+    """
+    level = eval_data["level"]
+    ascends = eval_data["ascends"]
+    avg_pct = eval_data["avg_pct"]
+    color = eval_data["color"]
+    d = eval_data["details"]
+
+    ascend_text = f" • Ascend A{ascends}" if ascends > 0 else ""
+
+    embed = discord.Embed(
+        title=f"📊 Card Stats Evaluation: {name}",
+        description=f"**Level:** `{level}/150`{ascend_text}\n"
+                    f"**Rating:** **{avg_pct:.2f}%**",
+        color=color,
+    )
+
+    stat_icons = {
+        "HP": "❤️",
+        "ATK": "⚔️",
+        "DEF": "🛡️",
+        "SPD": "🏃",
+    }
+
+    lines = []
+    for s in ["HP", "ATK", "DEF", "SPD"]:
+        val = d[s]["val"]
+        max_v = d[s]["max"]
+        pct = d[s]["pct"]
+        bar = make_progress_bar(pct, length=8)
+        lines.append(
+            f"{stat_icons[s]} **{s}:** `{val:,}` / `{max_v:,}` (**{pct:.2f}%**) `{bar}`"
+        )
+
+    embed.add_field(
+        name="Stats Breakdown (Current / Max)",
+        value="\n".join(lines),
+        inline=False,
+    )
+
+    embed.add_field(
+        name="📈 Overall Rating",
+        value=f"⭐ **{avg_pct:.2f}%**",
+        inline=True,
+    )
+
+    if image_url:
+        embed.set_thumbnail(url=image_url)
+
+    return embed
 
 
 # ─── Config Manager ───────────────────────────────────────
@@ -119,7 +408,7 @@ async def on_ready():
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
-            name="Mimi drops 👀",
+            name="Mimi drops & card stats 👀",
         )
     )
 
@@ -138,12 +427,78 @@ async def on_message(message: discord.Message):
     if not message.guild:
         return
 
-    # Check if message is from Mimi bot
+    # Check card stats evaluation request
+    await handle_calc_request(message)
+
+    # Check if message is from Mimi bot (drop card ping)
     if message.author.id == MIMI_BOT_ID:
         await _handle_mimi_message(message)
 
     # Still process prefix commands
     await bot.process_commands(message)
+
+
+async def handle_calc_request(message: discord.Message):
+    """
+    Handle card calculation requests when replying to a Mimi card message with `<@bot> calc` or `!calc` / `calc`.
+    """
+    if message.author.bot:
+        return
+
+    content = message.content.strip().lower()
+    is_mentioned = bot.user in message.mentions or f"<@{bot.user.id}>" in message.content or f"<@!{bot.user.id}>" in message.content
+    has_calc_word = "calc" in content
+
+    should_trigger = False
+    if has_calc_word and is_mentioned:
+        should_trigger = True
+    elif content.startswith("!calc") or content.startswith(".calc"):
+        should_trigger = True
+    elif message.reference and content == "calc":
+        should_trigger = True
+
+    if not should_trigger:
+        return
+
+    log.info(f"🔍 Received calc request from {message.author} in #{message.channel}")
+
+    target_msg = None
+    # 1. If replying to another message
+    if message.reference:
+        try:
+            if message.reference.resolved and isinstance(message.reference.resolved, discord.Message):
+                target_msg = message.reference.resolved
+            elif message.reference.message_id:
+                target_msg = await message.channel.fetch_message(message.reference.message_id)
+        except Exception as e:
+            log.warning(f"❌ Could not fetch referenced message: {e}")
+
+    # 2. Extract card data
+    name, level, stats, image_url = None, None, None, None
+
+    if target_msg:
+        name, level, stats, image_url = extract_card_from_message(target_msg)
+
+    # 3. If referenced message has no card, check if user pasted card text directly in their message
+    if stats is None:
+        name, level, stats = parse_card_from_text(message.content)
+
+    # 4. If card stats still not found
+    if stats is None:
+        help_text = (
+            "⚠️ **Card stats could not be found!**\n"
+            "👉 **How to use:** **Reply** to Mimi's card message and type `@Mia calc` (or `!calc`).\n"
+            "*You can also paste the card text directly into your message along with `calc`.*"
+        )
+        await message.reply(help_text, mention_author=False)
+        return
+
+    # 5. Evaluate card stats and send result
+    eval_data = evaluate_card(stats, level=level)
+    embed = build_evaluation_embed(name, eval_data, image_url=image_url)
+
+    await message.reply(embed=embed, mention_author=False)
+    log.info(f"   ✅ Evaluation complete: {name} (Lv.{level}) - Rating: {eval_data['avg_pct']:.2f}%")
 
 
 async def _handle_mimi_message(message: discord.Message):
@@ -215,6 +570,32 @@ async def _handle_mimi_message(message: discord.Message):
 
 # ─── Slash Commands ───────────────────────────────────────
 
+# /calc command
+@bot.tree.command(name="calc", description="Manually evaluate card stats")
+@app_commands.describe(
+    hp="HP stat",
+    atk="ATK stat",
+    def_="DEF stat",
+    spd="SPD stat",
+    level="Card level (1 - 150, default: 1)",
+    name="Card name (optional)",
+)
+async def slash_calc(
+    interaction: discord.Interaction,
+    hp: int,
+    atk: int,
+    def_: int,
+    spd: int,
+    level: int = 1,
+    name: str = "Custom Card",
+):
+    stats = {"HP": hp, "ATK": atk, "DEF": def_, "SPD": spd}
+    eval_data = evaluate_card(stats, level=level)
+    embed = build_evaluation_embed(name, eval_data)
+    await interaction.response.send_message(embed=embed)
+
+
+# --- /setup group ---
 setup_group = app_commands.Group(
     name="setup",
     description="Configure Mimi Helper Bot",
@@ -371,7 +752,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         )
 
 
-# ─── Health Check Web Server (keeps Render free tier alive) ─
+# ─── Health Check Web Server (keeps Render/cloud free tier alive) ─
 async def health_handler(request):
     return web.Response(text="OK")
 
@@ -390,7 +771,6 @@ async def start_webserver():
 
 # ─── Run ──────────────────────────────────────────────────
 async def main():
-    # Only start health check server if PORT is provided (e.g. Render/web hosts)
     port = os.getenv("PORT")
     if port:
         await start_webserver()
