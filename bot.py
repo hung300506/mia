@@ -434,14 +434,20 @@ def build_collection_evaluation_embed(cards: list[dict], page_title: str | None 
     else:
         color = 0x95A5A6  # Gray
 
-    title = page_title if page_title else f"📊 Collection Card Stats Evaluation ({len(cards)} cards)"
+    clean_title = None
+    if page_title:
+        clean_title = re.sub(r"(?:['’]s\s+)?(?:Full\s+)?Collection", "", page_title, flags=re.IGNORECASE).strip()
+        if not re.search(r"\w", clean_title):
+            clean_title = None
+
+    title = clean_title if clean_title else f"📊 Card Stats Evaluation ({len(cards)} cards)"
     embed = discord.Embed(
         title=title,
         description="\n\n".join(lines),
         color=color,
     )
     embed.set_footer(
-        text=f"Page Average: {page_avg:.2f}% • {len(cards)} card(s) evaluated • Formula: (Stat - Min) / (Max - Min)"
+        text=f"{len(cards)} card(s) evaluated"
     )
     return embed
 

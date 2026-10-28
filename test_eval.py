@@ -124,7 +124,15 @@ assert len(cards_real) == 7, f"Expected 7 cards, got {len(cards_real)}"
 assert cards_real[0]["name"] == "Furina" and cards_real[0]["code"] == "YURKR"
 assert cards_real[0]["idx"] == 8 and cards_real[0]["level"] == 1
 assert cards_real[0]["stats"] == {"HP": 5110, "ATK": 958, "DEF": 734, "SPD": 459}
-print("✅ Test 2B passed! Real Mimi collection with backticks `8.` parsed perfectly.")
+
+# Verify removal of "'s Full Collection", "Page Average", and "Formula"
+embed_real = build_collection_evaluation_embed(cards_real, page_title="📋 .hwng.'s Full Collection")
+assert "'s Full Collection" not in embed_real.title, "Title still contains 's Full Collection!"
+assert embed_real.title == "📋 .hwng.", f"Expected '📋 .hwng.', got {embed_real.title!r}"
+assert "Page Average" not in (embed_real.footer.text or ""), "Footer still contains Page Average!"
+assert "Formula" not in (embed_real.footer.text or ""), "Footer still contains Formula!"
+assert embed_real.footer.text == "7 card(s) evaluated", f"Unexpected footer text: {embed_real.footer.text!r}"
+print("✅ Test 2B passed! Real Mimi collection parsed, 's Full Collection, Page Average, and Formula removed.")
 
 # Test case: !help calc command registration & removal of paste / slash command
 cmd = main_bot.get_command("calc")
@@ -164,7 +172,7 @@ async def test_calc_handlers():
     await handle_calc_request(user_msg_reply)
     assert user_msg_reply.reply.called, "Reply was not called for '<@1476927725775356037> calc'!"
     embed_sent = user_msg_reply.reply.call_args.kwargs.get("embed")
-    assert embed_sent is not None and "Collection Card Stats Evaluation" in embed_sent.title
+    assert embed_sent is not None and "Card Stats Evaluation" in embed_sent.title
     print("✅ Test 5A passed! Reply with Mimi mention '<@1476927725775356037> calc' properly handled.")
 
     # Case B: User replies with "<@1476927725775356037> !calc"
