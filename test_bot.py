@@ -230,15 +230,15 @@ def parse_collection_from_text(full_text: str) -> list[dict]:
     Parse a collection / inventory page containing multiple cards from Mimi.
     Returns list of card dicts with idx, code, name, level, ascend, stats.
     """
-    chunks = re.split(r"(?:\n|^)\s*(?=\d+[\.\)])", full_text.strip())
+    chunks = re.split(r"(?:\n|^)\s*(?=`?\d+[\.\)]`?)", full_text.strip())
     cards = []
     for chunk in chunks:
         stats = extract_stats_from_line(chunk)
         if not stats:
             continue
 
-        # Index (must start with a numbered item like 1. or 2.)
-        m_idx = re.match(r"^\s*(\d+)[\.\)]", chunk)
+        # Index (supports `1.` or 1. or `1)` or 1))
+        m_idx = re.match(r"^\s*`?(\d+)[\.\)]`?", chunk)
         if not m_idx:
             continue
         idx = int(m_idx.group(1))
@@ -249,8 +249,8 @@ def parse_collection_from_text(full_text: str) -> list[dict]:
         clean_line = re.sub(r"<a?:[a-zA-Z0-9_]+:\d+>", " ", first_line)
         clean_line = re.sub(r":[a-zA-Z0-9_]+:", " ", clean_line)
         clean_line = clean_line.replace("\u2800", " ").replace("\u3000", " ").replace("\u00a0", " ")
+        clean_line = re.sub(r"^\s*`?\d+[\.\)]`?\s*", "", clean_line)
         clean_line = re.sub(r"[*_`~]", "", clean_line)
-        clean_line = re.sub(r"^\s*\d+[\.\)]\s*", "", clean_line)
 
         # Code: 4-7 uppercase alphanumeric after bullet or start
         m_code = re.search(r"(?:•|^|\s)([A-Z0-9]{4,7})\b", clean_line)
@@ -272,11 +272,12 @@ def parse_collection_from_text(full_text: str) -> list[dict]:
 
         name = re.sub(r"^[•\-\s]+|[•\-\s]+$", "", name)
 
-        # Level & Ascend
-        m_lvl = re.search(r"Lv\.?\s*(\d+)", chunk, re.I)
+        # Clean whole chunk for Level & Ascend (in case Lv.**1** A0 has markdown)
+        clean_chunk = re.sub(r"[*_`~]", "", chunk)
+        m_lvl = re.search(r"Lv\.?\s*[:：]?\s*(\d+)", clean_chunk, re.I)
         level = int(m_lvl.group(1)) if m_lvl else 1
 
-        m_asc = re.search(r"\bA(\d+)\b", chunk)
+        m_asc = re.search(r"\bA(\d+)\b", clean_chunk, re.I)
         ascend = int(m_asc.group(1)) if m_asc else None
 
         cards.append({

@@ -94,6 +94,38 @@ print("Collection Embed Description preview:\n" + embed.description[:300] + "...
 print("Collection Embed Footer:", embed.footer.text)
 print("✅ Test 2 passed! Collection cards parsed and concise embed built.")
 
+# Test case 2B: Real Mimi collection format with backticks around numbers (`8.`, `9.`, etc.)
+real_mimi_collection_text = """📋 .hwng.'s Full Collection
+`8.` ⠀ • `YURKR` <:tide:1489915367425052783> **Furina** • *Genshin Impact*
+     P**1221** • Lv.**1** A0 • Tide • ⚡ Heal
+     ❤️ **5,110** · ⚔️ **958** · 🛡️ **734** · 🏃 **459**
+`9.` ⠀ • `PS99V` <:verdant:1489915484987064350> **Chrollo Lucilfer** • *Hunter x Hunter* • Halloween 2026
+     P**48** • Lv.**1** A0 • Verdant • ⚡ Fortify
+     ❤️ **4,956** · ⚔️ **1,000** · 🛡️ **731** · 🏃 **547**
+`10.` ⠀ • `K0Q4Y` <:ember:1489915403978408026> **Nicole** • *Genshin Impact*
+     P**1235** • Lv.**1** A0 • Ember • ⚡ Rage
+     ❤️ **5,217** · ⚔️ **1,041** · 🛡️ **677** · 🏃 **462**
+`11.` ⠀ • `GIQ59` <:umbra:1489915281945137162> **Wiz** • *KonoSuba*
+     P**1248** • Lv.**1** A0 • Umbra • ⚡ Corrupt
+     ❤️ **5,080** · ⚔️ **966** · 🛡️ **691** · 🏃 **528**
+`12.` ⠀ • `NPCGJ` <:tide:1489915367425052783> **Oguri Cap** • *Umamusume: Pretty Derby*
+     P**1272** • Lv.**1** A0 • Tide • ⚡ Freeze
+     ❤️ **5,220** · ⚔️ **1,038** · 🛡️ **690** · 🏃 **548**
+`13.` ⠀ • `6ZLQ1` <:lumen:1489915233601323139> **Seele Vollerei** • *Honkai Impact*
+     P**1225** • Lv.**1** A0 • Lumen • ⚡ Bless
+     ❤️ **5,114** · ⚔️ **1,029** · 🛡️ **740** · 🏃 **506**
+`14.` ⠀ • `WLXA0` <:verdant:1489915484987064350> **Uruha Rushia** • *Hololive*
+     P**1202** • Lv.**1** A0 • Verdant • ⚡ Fortify
+     ❤️ **4,962** · ⚔️ **1,034** · 🛡️ **666** · 🏃 **507**
+Page 2/150 • 1047 cards"""
+
+cards_real = parse_collection_from_text(real_mimi_collection_text)
+assert len(cards_real) == 7, f"Expected 7 cards, got {len(cards_real)}"
+assert cards_real[0]["name"] == "Furina" and cards_real[0]["code"] == "YURKR"
+assert cards_real[0]["idx"] == 8 and cards_real[0]["level"] == 1
+assert cards_real[0]["stats"] == {"HP": 5110, "ATK": 958, "DEF": 734, "SPD": 459}
+print("✅ Test 2B passed! Real Mimi collection with backticks `8.` parsed perfectly.")
+
 # Test case: !help calc command registration & removal of paste / slash command
 cmd = main_bot.get_command("calc")
 assert cmd is not None, "calc command not registered in bot!"
