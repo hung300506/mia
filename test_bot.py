@@ -245,27 +245,50 @@ def parse_collection_from_text(full_text: str) -> list[dict]:
 
         # Code & Name from first line
         first_line = chunk.strip().split("\n")[0]
-        # Clean custom discord emojis and text emojis
-        clean_line = re.sub(r"<a?:[a-zA-Z0-9_]+:\d+>", " ", first_line)
-        clean_line = re.sub(r":[a-zA-Z0-9_]+:", " ", clean_line)
-        clean_line = clean_line.replace("\u2800", " ").replace("\u3000", " ").replace("\u00a0", " ")
-        clean_line = re.sub(r"^\s*`?\d+[\.\)]`?\s*", "", clean_line)
-        clean_line = re.sub(r"[*_`~]", "", clean_line)
+        parts = first_line.split("•")
 
-        # Code: 4-7 uppercase alphanumeric after bullet or start
-        m_code = re.search(r"(?:•|^|\s)([A-Z0-9]{4,7})\b", clean_line)
-        code = m_code.group(1) if m_code else None
-
+        code = None
         name = None
-        if code:
-            m_name = re.search(rf"\b{code}\b\s*([^•\n]+?)(?:\s*•|\n|$)", clean_line)
-            if m_name and m_name.group(1).strip():
-                name = m_name.group(1).strip()
 
+        if len(parts) >= 2:
+            # Mimi bullet structure:
+            # parts[0]: Index + optional custom tags/emojis (e.g. "2. 👜💰" or "4. :heaven:")
+            # parts[1]: Code + Element Emoji + Character Name (e.g. "73L :tide: Chisa")
+            # parts[2]: Series Name (e.g. "Wuthering Waves")
+            part1 = parts[1]
+            clean1 = re.sub(r"<a?:[a-zA-Z0-9_]+:\d+>", " ", part1)
+            clean1 = re.sub(r":[a-zA-Z0-9_]+:", " ", clean1)
+            clean1 = clean1.replace("\u2800", " ").replace("\u3000", " ").replace("\u00a0", " ")
+            clean1 = re.sub(r"[*_`~]", "", clean1).strip()
+
+            # Match code (2 to 7 alphanumeric uppercase) followed by character name
+            m = re.match(r"^([A-Z0-9]{2,7})\s+(.+)$", clean1)
+            if m:
+                code = m.group(1)
+                name = m.group(2).strip()
+            else:
+                name = clean1
+
+        # Fallback if structure didn't have bullets or didn't yield name
         if not name:
-            m_name2 = re.search(r"(?:•|^)\s*([^•\n]+?)(?:\s*•|\n|$)", clean_line)
-            if m_name2 and m_name2.group(1).strip():
-                name = m_name2.group(1).strip()
+            clean_line = re.sub(r"<a?:[a-zA-Z0-9_]+:\d+>", " ", first_line)
+            clean_line = re.sub(r":[a-zA-Z0-9_]+:", " ", clean_line)
+            clean_line = clean_line.replace("\u2800", " ").replace("\u3000", " ").replace("\u00a0", " ")
+            clean_line = re.sub(r"^\s*`?\d+[\.\)]`?\s*", "", clean_line)
+            clean_line = re.sub(r"[*_`~]", "", clean_line)
+
+            m_code = re.search(r"(?:•|^|\s)([A-Z0-9]{2,7})\b", clean_line)
+            code = m_code.group(1) if m_code else None
+
+            if code:
+                m_name = re.search(rf"\b{code}\b\s*([^•\n]+?)(?:\s*•|\n|$)", clean_line)
+                if m_name and m_name.group(1).strip():
+                    name = m_name.group(1).strip()
+
+            if not name:
+                m_name2 = re.search(r"(?:•|^)\s*([^•\n]+?)(?:\s*•|\n|$)", clean_line)
+                if m_name2 and m_name2.group(1).strip():
+                    name = m_name2.group(1).strip()
 
         if not name:
             name = f"Card #{idx}"

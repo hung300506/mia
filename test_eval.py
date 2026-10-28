@@ -134,6 +134,34 @@ assert "Formula" not in (embed_real.footer.text or ""), "Footer still contains F
 assert embed_real.footer.text == "7 card(s) evaluated", f"Unexpected footer text: {embed_real.footer.text!r}"
 print("✅ Test 2B passed! Real Mimi collection parsed, 's Full Collection, Page Average, and Formula removed.")
 
+# Test case 2C: Collections with tags (emojis, custom emojis) and short codes (0S, 73L)
+tagged_collection_text = """📋 jumpboy1's Full Collection — hp>50000
+1. ⠀ • K5QO :zephyr: Yunyun • KonoSuba
+P586 • Lv.150 A6 • Zephyr • ⚡ Gust
+❤️ 55,567 · ⚔️ 11,650 · 🛡️ 7,704 · 🏃 5,739
+2. 👜💰 • 73L :tide: Chisa • Wuthering Waves
+P40 • Lv.150 A6 • Tide • ⚡ Heal
+❤️ 55,431 · ⚔️ 11,463 · 🛡️ 7,810 · 🏃 5,907
+3. 🫸🫃 • K9G2 :lumen: Maki Nishikino • Love Live!
+P582 • Lv.150 A6 • Lumen • ⚡ Reflect
+❤️ 56,277 · ⚔️ 11,466 · 🛡️ 7,830 · 🏃 5,632
+4. :heaven: • 0S :umbra: Mejiro McQueen • Umamusume: Pretty Derby
+P1 • Lv.150 A6 • Umbra • ⚡ Drain
+❤️ 55,374 · ⚔️ 11,289 · 🛡️ 7,746 · 🏃 5,667"""
+
+cards_tagged = parse_collection_from_text(tagged_collection_text)
+assert len(cards_tagged) == 4, f"Expected 4 cards, got {len(cards_tagged)}"
+assert cards_tagged[0]["name"] == "Yunyun" and cards_tagged[0]["code"] == "K5QO"
+assert cards_tagged[1]["name"] == "Chisa" and cards_tagged[1]["code"] == "73L"
+assert cards_tagged[2]["name"] == "Maki Nishikino" and cards_tagged[2]["code"] == "K9G2"
+assert cards_tagged[3]["name"] == "Mejiro McQueen" and cards_tagged[3]["code"] == "0S"
+
+embed_tagged = build_collection_evaluation_embed(cards_tagged, page_title="📋 jumpboy1's Full Collection — hp>50000")
+assert embed_tagged.title == "📋 jumpboy1 — hp>50000"
+assert "`2.` **Chisa** (`73L`)" in embed_tagged.description
+assert "`4.` **Mejiro McQueen** (`0S`)" in embed_tagged.description
+print("✅ Test 2C passed! Tagged collection with emojis and short codes parsed perfectly.")
+
 # Test case: !help calc command registration & removal of paste / slash command
 cmd = main_bot.get_command("calc")
 assert cmd is not None, "calc command not registered in bot!"
