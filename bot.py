@@ -52,9 +52,9 @@ BASE_STATS = {
 
 # II, Stat gains per level (max level 150)
 PER_LEVEL = {
-    "HP": (45, 70),
+    "HP": (40, 70),
     "ATK": (8, 15),
-    "DEF": (5, 9),
+    "DEF": (5, 10),
     "SPD": (3, 8),
 }
 
@@ -72,60 +72,66 @@ ASCEND_TIERS = [
 
 
 # ─── Stat Calculator ────────────────────────────────────────
-def calculate_stats_range(level: int, current_hp: int | None = None, num_ascends: int | None = None):
+def calculate_stats_range(level: int, stats: dict[str, int] | None = None, num_ascends: int | None = None):
     """
     Calculate min and max range for each stat at a given level.
     Auto-detects ascend tier if num_ascends is not explicitly provided.
     """
     level = max(1, min(150, level))
 
+    def _get_ranges_for(asc_count: int):
+        res = {}
+        for s in ["HP", "ATK", "DEF", "SPD"]:
+            min_v, max_v = BASE_STATS[s]
+            min_g, max_g = PER_LEVEL[s]
+            curr = 1
+            for i, (m, b) in enumerate(ASCEND_TIERS):
+                if i < asc_count:
+                    target = min(level, m)
+                    min_v += (target - curr) * min_g
+                    max_v += (target - curr) * max_g
+                    curr = target
+                    min_v *= (1 + b)
+                    max_v *= (1 + b)
+                else:
+                    break
+            if curr < level:
+                min_v += (level - curr) * min_g
+                max_v += (level - curr) * max_g
+            res[s] = (round(min_v), round(max_v))
+        return res
+
     if num_ascends is None:
-        ascends = 0
-        for milestone, bonus in ASCEND_TIERS:
+        base_ascends = 0
+        for milestone, _ in ASCEND_TIERS:
             if level > milestone:
-                ascends += 1
-            elif level == milestone:
-                # Check midpoint at milestone to detect if ascended
-                temp_min, temp_max = BASE_STATS["HP"]
-                curr = 1
-                for m, b in ASCEND_TIERS[:ascends]:
-                    temp_min = (temp_min + (m - curr) * PER_LEVEL["HP"][0]) * (1 + b)
-                    temp_max = (temp_max + (m - curr) * PER_LEVEL["HP"][1]) * (1 + b)
-                    curr = m
-                unasc_max = temp_max + (milestone - curr) * PER_LEVEL["HP"][1]
-                unasc_min = temp_min + (milestone - curr) * PER_LEVEL["HP"][0]
-                asc_min = unasc_min * (1 + bonus)
-                midpoint = (unasc_max + asc_min) / 2
-                if current_hp and current_hp >= midpoint:
-                    ascends += 1
-                break
+                base_ascends += 1
             else:
                 break
-        num_ascends = ascends
 
-    result = {}
-    for stat in ["HP", "ATK", "DEF", "SPD"]:
-        min_v, max_v = BASE_STATS[stat]
-        min_g, max_g = PER_LEVEL[stat]
-        curr = 1
+        # Check if exactly at an ascend milestone
+        is_milestone = any(level == m for m, _ in ASCEND_TIERS)
+        if is_milestone and stats:
+            def score_candidate(cand_ascends):
+                r = _get_ranges_for(cand_ascends)
+                penalty = 0.0
+                for s, (min_v, max_v) in r.items():
+                    val = stats.get(s, (min_v + max_v) / 2)
+                    pct = ((val - min_v) / (max_v - min_v)) * 100.0
+                    if pct < 0:
+                        penalty += abs(pct) * 2.0
+                    elif pct > 100:
+                        penalty += (pct - 100.0) * 2.0
+                    else:
+                        penalty += abs(pct - 50.0) * 0.1
+                return penalty
 
-        for i, (m, b) in enumerate(ASCEND_TIERS):
-            if i < num_ascends:
-                target_lvl = min(level, m)
-                min_v += (target_lvl - curr) * min_g
-                max_v += (target_lvl - curr) * max_g
-                curr = target_lvl
-                min_v *= (1 + b)
-                max_v *= (1 + b)
-            else:
-                break
-        if curr < level:
-            min_v += (level - curr) * min_g
-            max_v += (level - curr) * max_g
+            if score_candidate(base_ascends + 1) < score_candidate(base_ascends):
+                base_ascends += 1
 
-        result[stat] = (round(min_v), round(max_v))
+        num_ascends = base_ascends
 
-    return result, num_ascends
+    return _get_ranges_for(num_ascends), num_ascends
 
 
 def evaluate_card(stats: dict[str, int], level: int = 1):
@@ -133,8 +139,7 @@ def evaluate_card(stats: dict[str, int], level: int = 1):
     Evaluate current stats against min and max stat ranges.
     Returns percentage for each stat and overall average rating.
     """
-    current_hp = stats.get("HP")
-    ranges, num_ascends = calculate_stats_range(level, current_hp=current_hp)
+    ranges, num_ascends = calculate_stats_range(level, stats=stats)
 
     details = {}
     total_pct = 0.0
