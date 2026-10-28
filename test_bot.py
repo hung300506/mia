@@ -530,18 +530,21 @@ async def on_message(message: discord.Message):
         )
 
     # Check card stats evaluation request
-    await handle_calc_request(message)
+    handled = await handle_calc_request(message)
+    if handled:
+        return
 
     # Process standard prefix commands
     await bot.process_commands(message)
 
 
-async def handle_calc_request(message: discord.Message):
+async def handle_calc_request(message: discord.Message) -> bool:
     """
     Handle card calculation requests when replying to a Mimi card message or collection page with `!calc` or `calc`.
+    Returns True if handled, False otherwise.
     """
     if message.author.bot:
-        return
+        return False
 
     # Clean mentions to see actual command words
     clean_content = re.sub(r"<@!?[0-9]+>|<@&[0-9]+>", " ", message.content).strip().lower()
@@ -576,66 +579,71 @@ async def handle_calc_request(message: discord.Message):
         should_trigger = True
 
     if not should_trigger:
-        return
+        return False
 
-    message._calc_handled = True
     log.info(f"🔍 Received calc request from {message.author} in #{message.channel}")
 
-    target_msg = None
-    # 1. Fetch referenced message
-    if message.reference:
-        try:
-            if message.reference.resolved and isinstance(message.reference.resolved, discord.Message):
-                target_msg = message.reference.resolved
-            if (not target_msg or (not target_msg.content and not target_msg.embeds)) and message.reference.message_id:
-                target_msg = await message.channel.fetch_message(message.reference.message_id)
-        except Exception as e:
-            log.warning(f"❌ Could not fetch referenced message: {e}")
+    try:
+        target_msg = None
+        # 1. Fetch referenced message
+        if message.reference:
+            try:
+                if message.reference.resolved and isinstance(message.reference.resolved, discord.Message):
+                    target_msg = message.reference.resolved
+                if (not target_msg or (not target_msg.content and not target_msg.embeds)) and message.reference.message_id:
+                    target_msg = await message.channel.fetch_message(message.reference.message_id)
+            except Exception as e:
+                log.warning(f"❌ Could not fetch referenced message: {e}")
 
-    # 2. Extract card or collection data from target message or user message fallback
-    cards, name, level, stats, image_url, page_title = None, None, None, None, None, None
+        # 2. Extract card or collection data from target message or user message fallback
+        cards, name, level, stats, image_url, page_title = None, None, None, None, None, None
 
-    if target_msg:
-        full_text, image_url, page_title = extract_message_content(target_msg)
-        cards = parse_collection_from_text(full_text)
-        if not cards:
-            name, level, stats = parse_card_from_text(full_text)
+        if target_msg:
+            full_text, image_url, page_title = extract_message_content(target_msg)
+            cards = parse_collection_from_text(full_text)
+            if not cards:
+                name, level, stats = parse_card_from_text(full_text)
 
-    # Fallback: Check if user pasted card stats in their own message
-    if not cards and stats is None:
-        user_text, user_img, user_title = extract_message_content(message)
-        cards = parse_collection_from_text(user_text)
-        if not cards:
-            name, level, stats = parse_card_from_text(user_text)
-        if cards or stats is not None:
-            image_url = user_img
-            page_title = user_title
+        # Fallback: Check if user pasted card stats in their own message
+        if not cards and stats is None:
+            user_text, user_img, user_title = extract_message_content(message)
+            cards = parse_collection_from_text(user_text)
+            if not cards:
+                name, level, stats = parse_card_from_text(user_text)
+            if cards or stats is not None:
+                image_url = user_img
+                page_title = user_title
 
-    # 3. If card stats still not found
-    if not cards and stats is None:
-        if not target_msg:
-            help_text = (
-                "⚠️ **Please reply to a Mimi card message or collection page!**\n"
-                "👉 **How to use:** Click **Reply** on Mimi's card message or collection page and type `!calc` (or `calc`)."
-            )
+        # 3. If card stats still not found
+        if not cards and stats is None:
+            if not target_msg:
+                help_text = (
+                    "⚠️ **Please reply to a Mimi card message or collection page!**\n"
+                    "👉 **How to use:** Click **Reply** on Mimi's card message or collection page and type `!calc` (or `calc`)."
+                )
+            else:
+                help_text = (
+                    "⚠️ **Card stats could not be found in the referenced message!**\n"
+                    "👉 Please ensure you are replying directly to a Mimi card message or collection page."
+                )
+            await message.reply(help_text, mention_author=False)
+            return True
+
+        # 4. Evaluate card stats and send result
+        if cards and len(cards) > 0:
+            embed = build_collection_evaluation_embed(cards, page_title=page_title)
+            await message.reply(embed=embed, mention_author=False)
+            log.info(f"   ✅ Collection evaluation complete: {len(cards)} card(s)")
         else:
-            help_text = (
-                "⚠️ **Card stats could not be found in the referenced message!**\n"
-                "👉 Please ensure you are replying directly to a Mimi card message or collection page."
-            )
-        await message.reply(help_text, mention_author=False)
-        return
-
-    # 4. Evaluate card stats and send result
-    if cards and len(cards) > 0:
-        embed = build_collection_evaluation_embed(cards, page_title=page_title)
-        await message.reply(embed=embed, mention_author=False)
-        log.info(f"   ✅ Collection evaluation complete: {len(cards)} card(s)")
-    else:
-        eval_data = evaluate_card(stats, level=level)
-        embed = build_evaluation_embed(name, eval_data, image_url=image_url)
-        await message.reply(embed=embed, mention_author=False)
-        log.info(f"   ✅ Evaluation complete: {name} (Lv.{level}) - Rating: {eval_data['avg_pct']:.2f}%")
+            eval_data = evaluate_card(stats, level=level)
+            embed = build_evaluation_embed(name, eval_data, image_url=image_url)
+            await message.reply(embed=embed, mention_author=False)
+            log.info(f"   ✅ Evaluation complete: {name} (Lv.{level}) - Rating: {eval_data['avg_pct']:.2f}%")
+        return True
+    except Exception as e:
+        log.error(f"❌ Error handling calc request: {e}", exc_info=True)
+        await message.reply("⚠️ An unexpected error occurred while calculating card stats. Please try again.", mention_author=False)
+        return True
 
 
 # ─── Prefix Command !calc (Help & Backup) ─────────────────
@@ -653,8 +661,6 @@ async def handle_calc_request(message: discord.Message):
 )
 async def cmd_calc(ctx: commands.Context):
     """Evaluate card stats from Mimi. Formula: (Current - Min) / (Max - Min)"""
-    if getattr(ctx.message, "_calc_handled", False):
-        return
     await handle_calc_request(ctx.message)
 
 
