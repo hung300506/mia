@@ -244,7 +244,10 @@ def parse_collection_from_text(full_text: str) -> list[dict]:
         idx = int(m_idx.group(1))
 
         # Code & Name from first line
-        first_line = chunk.strip().split("\n")[0]
+        lines = [l.strip() for l in chunk.strip().split("\n") if l.strip()]
+        first_line = lines[0] if lines else chunk.strip().split("\n")[0]
+        info_lines = lines[1:] if len(lines) > 1 else []
+        info_text = "\n".join(info_lines)
         parts = first_line.split("•")
 
         code = None
@@ -295,12 +298,14 @@ def parse_collection_from_text(full_text: str) -> list[dict]:
 
         name = re.sub(r"^[•\-\s]+|[•\-\s]+$", "", name)
 
-        # Clean whole chunk for Level & Ascend (in case Lv.**1** A0 has markdown)
-        clean_chunk = re.sub(r"[*_`~]", "", chunk)
-        m_lvl = re.search(r"Lv\.?\s*[:：]?\s*(\d+)", clean_chunk, re.I)
+        # Parse Level and Ascend specifically from lines after first_line (info_text)
+        # to avoid false matches if character name has "LV.999" or "Level"
+        target_info = info_text if info_text else chunk
+        clean_info = re.sub(r"[*_`~]", "", target_info)
+        m_lvl = re.search(r"\bLv\.?\s*[:：]?\s*(\d+)", clean_info, re.I)
         level = int(m_lvl.group(1)) if m_lvl else 1
 
-        m_asc = re.search(r"\bA(\d+)\b", clean_chunk, re.I)
+        m_asc = re.search(r"\bA(\d+)\b", clean_info)
         ascend = int(m_asc.group(1)) if m_asc else None
 
         cards.append({
@@ -320,26 +325,43 @@ def parse_card_from_text(full_text: str):
     """
     cleaned = clean_discord_text(full_text)
 
-    # 1. Level (default: 1)
+    name = "Card"
     level = 1
-    m_lvl = re.search(r"(?:Level|Lv\.?)\s*[:：]?\s*(\d+)", cleaned, re.IGNORECASE)
-    if m_lvl:
+
+    # 1. Match header pattern: <Card Name> | Level : <level>/150
+    m_header = re.search(
+        r"^(.*?)\s*\|\s*(?:Level|Lv\.?)\s*[:：]?\s*(\d+)(?:\s*\/\s*\d+)?",
+        cleaned,
+        re.MULTILINE | re.IGNORECASE,
+    )
+    if m_header and m_header.group(1).strip():
+        name = m_header.group(1).strip()
         try:
-            level = int(m_lvl.group(1))
+            level = int(m_header.group(2))
         except ValueError:
             level = 1
-
-    # 2. Card Name
-    name = "Card"
-    m_name = re.search(r"^(.*?)\s*\|\s*(?:Level|Lv\.?)", cleaned, re.MULTILINE | re.IGNORECASE)
-    if m_name and m_name.group(1).strip():
-        name = m_name.group(1).strip()
     else:
-        # Try finding card name as #ID
-        m_id = re.search(r"#(\d+)", cleaned)
-        if m_id:
-            name = f"Card #{m_id.group(1)}"
+        # Fallback for Level: look for "Level : X/150" pattern first
+        m_lvl = re.search(r"(?:Level|Lv\.?)\s*[:：]?\s*(\d+)\s*\/\s*\d+", cleaned, re.IGNORECASE)
+        if not m_lvl:
+            # Look for Level after pipe separator
+            m_lvl = re.search(r"\|\s*(?:Level|Lv\.?)\s*[:：]?\s*(\d+)", cleaned, re.IGNORECASE)
+        if not m_lvl:
+            m_lvl = re.search(r"\b(?:Level|Lv\.?)\s*[:：]?\s*(\d+)", cleaned, re.IGNORECASE)
+        if m_lvl:
+            try:
+                level = int(m_lvl.group(1))
+            except ValueError:
+                level = 1
 
+        # Fallback for Name
+        m_name = re.search(r"^(.*?)\s*\|\s*(?:Level|Lv\.?)", cleaned, re.MULTILINE | re.IGNORECASE)
+        if m_name and m_name.group(1).strip():
+            name = m_name.group(1).strip()
+        else:
+            m_id = re.search(r"#(\d+)", cleaned)
+            if m_id:
+                name = f"Card #{m_id.group(1)}"
     # 3. 4 Stats
     # Ignore text before **STATS** to prevent false matches from abilities, descriptions, etc.
     stats_text = cleaned

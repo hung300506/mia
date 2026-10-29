@@ -53,6 +53,24 @@ print(f"\nTricky Card Parsed: Name={name2}, Level={level2}, Stats={stats2}")
 assert stats2 == {"HP": 10240, "ATK": 2150, "DEF": 1480, "SPD": 720}, f"Stats mismatch! Got {stats2}"
 print("✅ Test 1 passed! False stats in ability were ignored, correct stats extracted from after **STATS**.")
 
+# Test case 1B: Card with "LV.999" in character name (Single Card View)
+lv999_single_text = """
+Silver Wolf LV.999  |  Level : 1/150
+
+Element: Verdant <:verdant:1489915484987064350>
+Ability: Regenerate — Restore 2% max HP.
+
+*Honkai Star Rail*  •  `LJ8SB`  •  #1290  •  <@123>
+
+**STATS**
+❤️ `HP  :` **4,755**　⚔️ `ATK :` **955**
+🛡️ `DEF :` **739**　🏃 `SPD :` **467**
+"""
+name_lv999, level_lv999, stats_lv999 = parse_card_from_text(lv999_single_text)
+assert name_lv999 == "Silver Wolf LV.999", f"Expected 'Silver Wolf LV.999', got {name_lv999!r}"
+assert level_lv999 == 1, f"Expected level 1, got {level_lv999!r} (falsely parsed LV.999 from name!)"
+print("✅ Test 1B passed! Single card with 'LV.999' in name parsed level=1 and correct name.")
+
 # Test case with multi-card collection page view
 from bot import parse_collection_from_text, build_collection_evaluation_embed, bot as main_bot
 
@@ -161,6 +179,25 @@ assert embed_tagged.title == "📋 jumpboy1 — hp>50000"
 assert "`2.` **Chisa** (`73L`)" in embed_tagged.description
 assert "`4.` **Mejiro McQueen** (`0S`)" in embed_tagged.description
 print("✅ Test 2C passed! Tagged collection with emojis and short codes parsed perfectly.")
+
+# Test case 2D: Collection with "LV.999" in character names (Collection View)
+lv999_collection_text = """📋 .hwng.'s Full Collection — name: 999
+1. ⠀ • LJ8SB :verdant: Silver Wolf LV.999 • Honkai Star Rail
+P1290 • Lv.1 A0 • Verdant • ⚡ Shield
+❤️ 4,755 · ⚔️ 955 · 🛡️ 739 · 🏃 467
+2. ⠀ • 2HH7 :verdant: Silver Wolf LV.999 • Honkai Star Rail
+P1093 • Lv.1 A0 • Verdant • ⚡ Regenerate
+❤️ 4,916 · ⚔️ 1,043 · 🛡️ 654 · 🏃 480
+Image
+Page 1/1 • 2 cards"""
+
+cards_lv999 = parse_collection_from_text(lv999_collection_text)
+assert len(cards_lv999) == 2, f"Expected 2 cards, got {len(cards_lv999)}"
+assert cards_lv999[0]["name"] == "Silver Wolf LV.999" and cards_lv999[0]["code"] == "LJ8SB"
+assert cards_lv999[0]["level"] == 1, f"Expected level 1, got {cards_lv999[0]['level']} (falsely parsed LV.999 from name!)"
+assert cards_lv999[1]["name"] == "Silver Wolf LV.999" and cards_lv999[1]["code"] == "2HH7"
+assert cards_lv999[1]["level"] == 1, f"Expected level 1, got {cards_lv999[1]['level']}"
+print("✅ Test 2D passed! Collection with 'LV.999' in character names parsed level=1 accurately.")
 
 # Test case: !help calc command registration & removal of paste / slash command
 cmd = main_bot.get_command("calc")
